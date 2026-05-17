@@ -82,7 +82,7 @@ sequenceDiagram
 ```
 
 ## Hardware (as tested)
-- **Controller**: FluidNC Controller running FluidNC v3.9.9 (tested on [V1E Jackpot](https://docs.v1e.com/electronics/jackpot/))
+- **Controller**: FluidNC Controller running FluidNC v4.0.3 (tested on [V1E Jackpot](https://docs.v1e.com/electronics/jackpot/))
 - **Pendant**: M5Dial (ESP32-S3) running FluidDial `m5dial_espnow` build
 
 ---
