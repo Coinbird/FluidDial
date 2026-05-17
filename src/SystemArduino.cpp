@@ -53,7 +53,20 @@ static int uart_getchar_impl() {
     return -1;
 }
 
-#ifdef USE_WIFI
+#ifdef USE_ESPNOW
+#    include "ESPNowTransport.h"
+// ── Routing: dispatch fnc_putchar/fnc_getchar to ESP-NOW or UART ─────────────
+extern "C" void fnc_putchar(uint8_t c) {
+    if (espnow_use_uart_mode()) uart_putchar_impl(c);
+    else espnow_putchar(c);
+}
+extern "C" int fnc_getchar() {
+    if (espnow_use_uart_mode()) return uart_getchar_impl();
+    int c = espnow_getchar();
+    if (c >= 0) update_rx_time();
+    return c;
+}
+#elif defined(USE_WIFI)
 // ── Routing: dispatch fnc_putchar/fnc_getchar to WiFi or UART ────────────────
 extern "C" void fnc_putchar(uint8_t c) {
     if (wifi_use_uart_mode()) uart_putchar_impl(c);
@@ -73,8 +86,9 @@ extern "C" int  fnc_getchar()          { return uart_getchar_impl(); }
 // In WiFi mode this MUST drive the WebSocket so that the "ok" response from
 // FluidNC can arrive in _rx_buf — otherwise fnc_send_line() blocks for the
 // full 2000 ms timeout on every second jog command, causing the stall.
+// In ESP-NOW mode the recv callback is interrupt-driven so nothing to poll here.
 extern "C" void poll_extra() {
-#ifdef USE_WIFI
+#if !defined(USE_ESPNOW) && defined(USE_WIFI)
     wifi_poll();
 #endif
 #ifdef DEBUG_TO_USB
@@ -153,7 +167,9 @@ void init_system() {
     canvas.createSprite(240, 240);  // display.width(), display.height());
 }
 void resetFlowControl() {
-#ifdef USE_WIFI
+#ifdef USE_ESPNOW
+    if (!espnow_use_uart_mode()) return;  // no-op over ESP-NOW
+#elif defined(USE_WIFI)
     if (!wifi_use_uart_mode()) return;  // no-op over WebSocket
 #endif
     fnc_putchar(0x11);

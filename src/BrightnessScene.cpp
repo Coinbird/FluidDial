@@ -5,7 +5,11 @@
 #include "BrightnessScene.h"
 #include "Drawing.h"
 #include "System.h"
-#include "SystemScene.h"
+#ifdef USE_WIFI
+#    include "SystemScene.h"
+#else
+extern Scene statusScene;  // fall back to main status screen when no WiFi stack
+#endif
 
 static constexpr int MIN_BRIGHTNESS = 8;
 
@@ -28,8 +32,20 @@ void BrightnessScene::onEncoder(int delta) {
     reDisplay();
 }
 
-void BrightnessScene::onDialButtonPress() { activate_scene(&systemScene); }
-void BrightnessScene::onRedButtonPress()  { activate_scene(&systemScene); }
+void BrightnessScene::onDialButtonPress() { activate_scene(
+#ifdef USE_WIFI
+    &systemScene
+#else
+    &statusScene
+#endif
+); }
+void BrightnessScene::onRedButtonPress()  { activate_scene(
+#ifdef USE_WIFI
+    &systemScene
+#else
+    &statusScene
+#endif
+); }
 
 void BrightnessScene::reDisplay() {
     background();

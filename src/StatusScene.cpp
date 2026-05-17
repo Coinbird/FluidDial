@@ -228,6 +228,11 @@ public:
             drawWiFiSignalBars(70, 20);
         }
 #endif
+#ifdef USE_ESPNOW
+        if (round_display) {
+            drawESPNowIndicator(70, 20);
+        }
+#endif
         refreshDisplay();
     }
 };

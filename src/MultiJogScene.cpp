@@ -35,6 +35,11 @@ private:
     static const uint32_t MPG_INTERVAL_MS = 30;
     int      _mpg_accum   = 0;
     uint32_t _last_mpg_ms = 0;
+    // Continuous (button-held) jog sends one long $J= command then goes quiet.
+    // FluidNC's jog watchdog cancels the jog if the pendant goes silent, so
+    // we send a lightweight '?' keepalive while the button is held.
+    static const uint32_t JOG_KEEPALIVE_MS = 250;
+    uint32_t _last_jog_keepalive_ms = 0;
 
 public:
     MultiJogScene() : Scene("Jog", 4, jog_help_text) {}
@@ -442,6 +447,15 @@ public:
 
     void onPoll() override {
         flush_mpg();
+        // Keepalive for a button-held continuous jog: tells FluidNC's jog
+        // watchdog the pendant is still alive so it doesn't cancel the jog.
+        if (_continuous) {
+            uint32_t now = millis();
+            if ((now - _last_jog_keepalive_ms) >= JOG_KEEPALIVE_MS) {
+                _last_jog_keepalive_ms = now;
+                fnc_realtime(StatusReport);  // '?' — lightweight, raw byte
+            }
+        }
     }
 
     void onDROChange() {

@@ -9,6 +9,9 @@
 #include "Scene.h"
 #include "e4math.h"
 #include "HomingScene.h"
+#ifdef USE_ESPNOW
+#    include "ESPNowTransport.h"
+#endif
 
 extern Scene statusScene;
 
@@ -211,7 +214,11 @@ static void connect_init() {
 #endif
     send_line("$G");                     // Refresh GCode modes
     send_line("$G");                     // Refresh GCode modes
+#ifndef USE_ESPNOW
     send_line("$RI=200");                // Enable auto-reporting every 200 ms
+#endif
+    // In ESP-NOW mode the report interval is set by espnow_channel.report_interval_ms
+    // in config.yaml on the FluidNC side — do not override it from here.
     init_file_list();                    // Request SD file list
     detect_homing_info();                // Probe axis homing state
 }
@@ -296,12 +303,14 @@ extern "C" void show_gcode_modes(struct gcode_modes* modes) {
 int disconnect_ms = 0;
 int next_ping_ms  = 0;
 
-// If we haven't heard from FluidNC in 4 seconds for some other reason,
-// send a status report request.
-const int ping_interval_ms = 4000;
+// Send a status report request if we haven't heard from FluidNC recently.
+// The interval also serves as a keepalive: FluidNC's ESP-NOW server uses
+// inbound pings to detect a dead pendant (kIdleTimeoutMs = 4000 ms), so the
+// ping interval must stay well below that to avoid false-positive timeouts.
+const int ping_interval_ms = 1500;
 
 // If we haven't heard from FluidNC in 6 seconds for any reason, declare
-// FluidNC unresponsive.  After a ping, FluidNC has 2 seconds to respond.
+// FluidNC unresponsive.
 const int disconnect_interval_ms = 6000;
 
 bool starting = true;
@@ -313,9 +322,6 @@ void request_status_report() {
 }
 
 bool fnc_is_connected() {
-#ifdef DEV_SIMULATED_CONNECT
-    return true;
-#endif
     int now = milliseconds();
     if (starting) {
         starting      = false;
@@ -326,6 +332,11 @@ bool fnc_is_connected() {
     if ((now - disconnect_ms) >= 0) {
         next_ping_ms  = now + ping_interval_ms;
         disconnect_ms = now + disconnect_interval_ms;
+#ifdef USE_ESPNOW
+        if (!espnow_use_uart_mode()) {
+            espnow_request_connect();  // re-trigger handshake after FluidNC reboot
+        }
+#endif
         return false;
     }
 

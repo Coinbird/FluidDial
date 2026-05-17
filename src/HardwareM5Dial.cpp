@@ -10,6 +10,9 @@
 #ifdef USE_WIFI
 #    include "WiFiConnection.h"
 #endif
+#ifdef USE_ESPNOW
+#    include "ESPNowTransport.h"
+#endif
 
 LGFX_Device&       display = M5Dial.Display;
 LGFX_Sprite        canvas(&M5Dial.Display);
@@ -42,7 +45,11 @@ void init_hardware() {
     // at the other end to anything you want and it will still work.
     USBSerial.begin();
 
-#ifdef USE_WIFI
+#ifdef USE_ESPNOW
+    // Always init UART so espnow_transport_init() can listen for wired data.
+    init_fnc_uart(FNC_UART_NUM, PND_TX_FNC_RX_PIN, PND_RX_FNC_TX_PIN);
+    espnow_transport_init();  // detects wired vs wireless, inits ESP-NOW if needed
+#elif defined(USE_WIFI)
     if (wifi_use_uart_mode()) {
         init_fnc_uart(FNC_UART_NUM, PND_TX_FNC_RX_PIN, PND_RX_FNC_TX_PIN);
     }
@@ -142,14 +149,6 @@ bool ui_locked(bool redrawButtonsFlag) {
 int num_layouts = 1;
 int32_t layout_num = 0;
 void redrawButtons() {}
-
-int battery_level() {
-    return M5Dial.Power.getBatteryLevel();
-}
-
-bool battery_charging() {
-    return M5Dial.Power.isCharging();
-}
 
 #include <driver/rtc_io.h>
 // The M5 Library is broken with respect to deep sleep on M5 Dial

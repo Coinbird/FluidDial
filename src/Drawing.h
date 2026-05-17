@@ -91,8 +91,8 @@ void drawPngBackground(const char* filename);
 void drawWiFiSignalBars(int x0, int y_bot);
 #endif
 
-#ifdef USE_M5
-void drawBatteryLevel(int x0, int y_bot);
+#ifdef USE_ESPNOW
+void drawESPNowIndicator(int x0, int y_bot);
 #endif
 
 void refreshDisplay();

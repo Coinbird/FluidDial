@@ -8,6 +8,9 @@
 #ifdef USE_WIFI
 #    include "WiFiConnection.h"
 #endif
+#ifdef USE_ESPNOW
+#    include "ESPNowTransport.h"
+#endif
 
 void drawBackground(int color) {
     canvas.fillSprite(color);
@@ -120,6 +123,20 @@ void drawStatus() {
     static constexpr int y      = 24;
     static constexpr int width  = 140;
     static constexpr int height = 36;
+
+#ifdef USE_ESPNOW
+    if (state == Disconnected) {
+        // Show whether we are waiting on a wired or wireless link.
+        int bgColor = stateBGColors[state];
+        canvas.fillRoundRect((display_short_side() - width) / 2, y, width, height, 5, bgColor);
+        int fgColor = stateFGColors[state];
+        centered_text("N/C", y + height / 2 - 4, fgColor, SMALL);
+        centered_text(espnow_use_uart_mode() ? "Serial" : "Wireless", y + height / 2 + 12, fgColor, TINY);
+        // Draw PNG centered above the N/C bar (icon is 70×20, bar top is at y)
+        drawESPNowIndicator((display_short_side() - 70) / 2, y);
+        return;
+    }
+#endif
 
 #ifdef USE_WIFI
     if (state == Disconnected && !wifi_use_uart_mode()) {
@@ -340,48 +357,37 @@ void drawWiFiSignalBars(int x0, int y_bot) {
     }
 }
 
-#ifdef USE_M5
-void drawBatteryLevel(int x0, int y_bot) {
-    int level = battery_level();
-    if (level < 0) return;
-
-    constexpr int W  = 20;
-    constexpr int H  = 13;
-    constexpr int NW = 4;
-    constexpr int NH = 7;
-
-    bool charging  = battery_charging();
-    int  fill_color = charging ? ORANGE : (level > 50) ? GREEN : (level > 20) ? YELLOW : RED;
-
-    // Body outline and nub
-    canvas.drawRect(x0, y_bot - H, W, H, WHITE);
-    canvas.fillRect(x0 + W, y_bot - (H + NH) / 2, NW, NH, WHITE);
-
-    // Level fill
-    int fill_w = (level * (W - 2)) / 100;
-    if (fill_w > 0) {
-        canvas.fillRect(x0 + 1, y_bot - H + 1, fill_w, H - 2, fill_color);
-    }
-
-    // Lightning bolt overlay when charging
-    if (charging) {
-        int bx = x0 + W / 2;
-        int by = y_bot - (H + 1) / 2;  // vertical center
-        canvas.fillTriangle(bx + 3, by - 4, bx - 1, by, bx + 3, by, WHITE);
-        canvas.fillTriangle(bx - 3, by, bx + 1, by, bx - 3, by + 4, WHITE);
-    }
-}
-#endif
-
 static void drawWiFiSignalOverlay() {
     if (round_display) return;   // M5 Dial: WiFi indicator only shown in menu scene
     drawWiFiSignalBars(5, 20);
 }
 #endif
 
+#ifdef USE_ESPNOW
+// Custom ESP-NOW wireless indicator icon.
+// Loaded from LittleFS as /espnow.png (70×20 px, transparent background).
+// Drawn in wireless mode only; hidden when wired UART is active.
+// x0 is the left edge; y_bot is the bottom baseline of the icon slot.
+void drawESPNowIndicator(int x0, int y_bot) {
+    if (espnow_use_uart_mode()) {
+        return;
+    }
+    // Icon is 70×20 px; top-left corner at (x0, y_bot-20).
+    canvas.drawPngFile(LittleFS, "/espnow.png", x0, y_bot - 20, 70, 20, 0, 0, 0.0f, 0.0f, datum_t::top_left);
+}
+
+static void drawESPNowOverlay() {
+    if (round_display) return;   // M5 Dial: indicator only shown per-scene
+    drawESPNowIndicator(0, 20);
+}
+#endif
+
 void refreshDisplay() {
 #ifdef USE_WIFI
     drawWiFiSignalOverlay();
+#endif
+#ifdef USE_ESPNOW
+    drawESPNowOverlay();
 #endif
     display.startWrite();
     canvas.pushSprite(sprite_offset.x, sprite_offset.y);
