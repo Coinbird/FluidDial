@@ -79,9 +79,7 @@ void PieMenu::menuBackground() {
     }
 #endif
 #ifdef USE_ESPNOW
-    if (round_display) {
-        drawESPNowIndicator((display_short_side() - 70) / 2, 95);
-    }
+    drawESPNowIndicator((display_short_side() - 70) / 2, round_display ? 95 : 90);
 #endif
 }
 

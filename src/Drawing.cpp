@@ -132,8 +132,6 @@ void drawStatus() {
         int fgColor = stateFGColors[state];
         centered_text("N/C", y + height / 2 - 4, fgColor, SMALL);
         centered_text(espnow_use_uart_mode() ? "Serial" : "Wireless", y + height / 2 + 12, fgColor, TINY);
-        // Draw PNG centered above the N/C bar (icon is 70×20, bar top is at y)
-        drawESPNowIndicator((display_short_side() - 70) / 2, y);
         return;
     }
 #endif
@@ -376,18 +374,11 @@ void drawESPNowIndicator(int x0, int y_bot) {
     canvas.drawPngFile(LittleFS, "/espnow.png", x0, y_bot - 20, 70, 20, 0, 0, 0.0f, 0.0f, datum_t::top_left);
 }
 
-static void drawESPNowOverlay() {
-    if (round_display) return;   // M5 Dial: indicator only shown per-scene
-    drawESPNowIndicator(0, 20);
-}
 #endif
 
 void refreshDisplay() {
 #ifdef USE_WIFI
     drawWiFiSignalOverlay();
-#endif
-#ifdef USE_ESPNOW
-    drawESPNowOverlay();
 #endif
     display.startWrite();
     canvas.pushSprite(sprite_offset.x, sprite_offset.y);
