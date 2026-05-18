@@ -259,10 +259,10 @@ void espnow_request_connect() {
     }
 
     // Still down. Re-acquire the controller's channel — throttled to once
-    // per 20 s so the multi-channel scan doesn't keep freezing the UI while
+    // per 8 s so the multi-channel scan doesn't keep freezing the UI while
     // the controller is simply powered off.
     uint32_t now = millis();
-    if ((now - last_full_scan) < 20000) {
+    if ((now - last_full_scan) < 8000) {
         return;
     }
     last_full_scan = now;
