@@ -33,53 +33,7 @@ subsequent traffic switches to unicast. The broadcast status channel stays activ
 display-only devices (no connection needed) keep receiving status updates.
 
 ## Pairing sequence
-
-Solid arrows = **unicast** (802.11 ACK/retry); dashed arrows = **broadcast** (fire-and-forget).
-
-```mermaid
-sequenceDiagram
-    participant P as FluidDial Pendant
-    participant C as FluidNC Controller
-
-    Note over P,C: ── Boot: channel discovery (broadcast) ──
-    P->>P: espnow_transport_init()<br/>UART probe times out → ESP-NOW mode
-    loop scan_for_channel(): WiFi ch 1..13 until a reply
-        P-->>C: "?" probe (broadcast)
-        C-->>P: [FluidNC: ?] (broadcast, no client yet)
-    end
-    Note over P: channel locked, cached in NVS
-
-    Note over P,C: ── Pairing handshake (broadcast → unicast) ──
-    P-->>C: [FluidNC: Connect] (broadcast)
-    C->>C: createClient(mac) → assign id=1<br/>add pendant MAC as unicast peer
-    C->>P: [FluidNC: Connected id=1] (unicast)
-    Note over C: log: espnow: remote (id=1) connected
-    P->>P: latch _tx_mac = controller MAC<br/>add unicast peer, _pendant_id = 1
-
-    Note over P,C: ── Steady state (all unicast) ──
-    loop while connected
-        C->>P: <Idle|MPos:…> status (unicast, every report_interval_ms)
-        P->>C: GCode / jog / "?" keepalive (unicast)
-    end
-
-    Note over P,C: ── Pendant lost (power off / out of range) ──
-    P-xC: (silence — no more packets)
-    C->>C: ESPNowClient::autoReport()<br/>no RX for kIdleTimeoutMs (4 s) → _stale = true
-    Note over C: log: espnow: remote (id=1) disconnected
-
-    Note over P,C: ── Reconnect (pendant back, or controller rebooted) ──
-    P->>P: espnow_request_connect()<br/>_tx_mac → broadcast
-    opt controller rebooted on a different WiFi channel
-        P-->>C: re-scan channels ("?" probe)
-        C-->>P: [FluidNC: ?] (broadcast)
-        Note over P: re-lock channel, update NVS
-    end
-    P-->>C: [FluidNC: Connect] (broadcast)
-    C->>C: findClient(mac) exists → reactivate()<br/>reuse object in place, keep id=1
-    C->>P: [FluidNC: Connected id=1] (unicast)
-    Note over C: log: espnow: remote (id=1) reconnected
-    P->>P: re-latch _tx_mac → unicast resumes
-```
+* See time sequence mermaid diagram at the bottom of this document.
 
 ## Hardware (as tested)
 - **Controller**: FluidNC Controller running FluidNC v4.0.3 (tested on [V1E Jackpot](https://docs.v1e.com/electronics/jackpot/))
@@ -95,6 +49,13 @@ espnow_channel:
 `report_interval_ms` is the only setting — it sets how often FluidNC pushes a status report
 to a connected remote. 100–200 ms gives a responsive UI. In ESP-NOW mode FluidDial does **not**
 send `$RI=` — the YAML value is authoritative.
+
+Also, if you have I2S_STATIC in your `config.yaml`, change to:
+```yaml
+stepping: 
+  engine: I2S
+```
+(This is a change from the Portability branch)
 
 ---
 ## Architecture notes
@@ -232,5 +193,53 @@ pio run -e m5dial_espnow -t uploadfs
 ```
 
 ### FluidNC
-Build and flash normally for the Jackpot; add the `espnow_channel:` stanza to `config.yaml`
-(see above).
+Build and flash normally for the Jackpot; add the `espnow_channel:` stanza and change I2S_STATIC to I2S for the engine in `config.yaml` (see above). 
+
+### Time Sequence Diagrams
+
+Solid arrows = **unicast** (802.11 ACK/retry); dashed arrows = **broadcast** (fire-and-forget).
+
+```mermaid
+sequenceDiagram
+    participant P as FluidDial Pendant
+    participant C as FluidNC Controller
+
+    Note over P,C: ── Boot: channel discovery (broadcast) ──
+    P->>P: espnow_transport_init()<br/>UART probe times out → ESP-NOW mode
+    loop scan_for_channel(): WiFi ch 1..13 until a reply
+        P-->>C: "?" probe (broadcast)
+        C-->>P: [FluidNC: ?] (broadcast, no client yet)
+    end
+    Note over P: channel locked, cached in NVS
+
+    Note over P,C: ── Pairing handshake (broadcast → unicast) ──
+    P-->>C: [FluidNC: Connect] (broadcast)
+    C->>C: createClient(mac) → assign id=1<br/>add pendant MAC as unicast peer
+    C->>P: [FluidNC: Connected id=1] (unicast)
+    Note over C: log: espnow: remote (id=1) connected
+    P->>P: latch _tx_mac = controller MAC<br/>add unicast peer, _pendant_id = 1
+
+    Note over P,C: ── Steady state (all unicast) ──
+    loop while connected
+        C->>P: <Idle|MPos:…> status (unicast, every report_interval_ms)
+        P->>C: GCode / jog / "?" keepalive (unicast)
+    end
+
+    Note over P,C: ── Pendant lost (power off / out of range) ──
+    P-xC: (silence — no more packets)
+    C->>C: ESPNowClient::autoReport()<br/>no RX for kIdleTimeoutMs (4 s) → _stale = true
+    Note over C: log: espnow: remote (id=1) disconnected
+
+    Note over P,C: ── Reconnect (pendant back, or controller rebooted) ──
+    P->>P: espnow_request_connect()<br/>_tx_mac → broadcast
+    opt controller rebooted on a different WiFi channel
+        P-->>C: re-scan channels ("?" probe)
+        C-->>P: [FluidNC: ?] (broadcast)
+        Note over P: re-lock channel, update NVS
+    end
+    P-->>C: [FluidNC: Connect] (broadcast)
+    C->>C: findClient(mac) exists → reactivate()<br/>reuse object in place, keep id=1
+    C->>P: [FluidNC: Connected id=1] (unicast)
+    Note over C: log: espnow: remote (id=1) reconnected
+    P->>P: re-latch _tx_mac → unicast resumes
+```
