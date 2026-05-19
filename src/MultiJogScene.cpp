@@ -447,9 +447,13 @@ public:
 
     void onPoll() override {
         flush_mpg();
-        // Keepalive for a button-held continuous jog: tells FluidNC's jog
-        // watchdog the pendant is still alive so it doesn't cancel the jog.
-        if (_continuous) {
+        // Keepalive while any jog is running — button-held continuous OR
+        // MPG/dial. Both leave the pendant silent while the move executes
+        // (an MPG click sends one $J= then goes quiet), so FluidNC's jog
+        // watchdog would cancel a long move (e.g. a 100 mm single click)
+        // mid-stroke without this. Gated on Jog state so an idle pendant
+        // stays quiet.
+        if (state == Jog) {
             uint32_t now = millis();
             if ((now - _last_jog_keepalive_ms) >= JOG_KEEPALIVE_MS) {
                 _last_jog_keepalive_ms = now;

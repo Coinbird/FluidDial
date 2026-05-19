@@ -45,10 +45,15 @@ Add this to the FluidNC `config.yaml` alongside the uart_channel sections:
 ```yaml
 espnow_channel:
   report_interval_ms: 100
+  broadcast_mode_rate: 200
 ```
-`report_interval_ms` is the only setting — it sets how often FluidNC pushes a status report
-to a connected remote. 100–200 ms gives a responsive UI. In ESP-NOW mode FluidDial does **not**
-send `$RI=` — the YAML value is authoritative.
+- `report_interval_ms` — how often FluidNC pushes a status report to a *connected* remote
+  (e.g. FluidDial). 100–200 ms gives a responsive UI. In ESP-NOW mode FluidDial does **not**
+  send `$RI=` — the YAML value is authoritative.
+- `broadcast_mode_rate` — how often (ms) FluidNC broadcasts status as `[FluidNC: <...>]` for
+  passive display devices. Optional; **defaults to 200 ms** if omitted. Set to `0` to disable
+  broadcasting. Display devices are passive listeners — they never connect and never set this;
+  it is config-authoritative.
 
 Also, if you have I2S_STATIC in your `config.yaml`, change to:
 ```yaml
@@ -81,8 +86,7 @@ once connected.
 | `[FluidNC: Connected id=N]` | FluidNC → Remote | Confirmed; remote ID N assigned, MAC latched for unicast |
 | `[FluidNC: Busy]` | FluidNC → Remote | All 4 remote slots occupied |
 | `[FluidNC: Disconnect]` | Remote → FluidNC | Release the slot (graceful disconnect; optional) |
-| `[FluidNC: $report/interval=N]` | Remote → FluidNC | Set broadcast status interval (display mode) |
-| `[FluidNC: <Idle\|...>]` | FluidNC → all | Periodic broadcast status (display mode) |
+| `[FluidNC: <Idle\|...>]` | FluidNC → all | Periodic broadcast status (display mode), gated by `broadcast_mode_rate` |
 | `[FluidNC: ?]` | FluidNC → all | Reply to a `?` channel probe from an unconnected device |
 
 ### FluidNC side (`ESPNowServer` + `ESPNowClient` + `ESPNowBroadcastChannel`)
@@ -96,8 +100,13 @@ Split into classes following the TelnetServer/TelnetClient pattern:
   reconnecting remote reuses its existing object via `reactivate()` (deleting a `Channel` from
   the ESP-NOW recv callback would race the main task's channel poll). TX is always unicast.
 - **`ESPNowBroadcastChannel`** (`Channel`, internal to `ESPNowServer.cpp`): registered with
-  `allChannels`; filters status lines starting with `<` and broadcasts them as `[FluidNC: <...>]`.
-  Enables display-only devices with no connection required.
+  `allChannels`; broadcasts status as `[FluidNC: <...>]` every `broadcast_mode_rate` ms.
+  It **overrides `autoReport()`** to drop the base class's motion-state gate — the base
+  `Channel::autoReport()` only emits periodic reports while the machine is *moving*
+  (Cycle/Homing/Jog), so a passive display would see nothing while the machine sits idle.
+  The override emits a full status report unconditionally at the configured interval.
+  Enables any number of display-only devices with no connection required; disabled when
+  `broadcast_mode_rate` is 0.
 
 ### Keepalive, disconnect detection, and the jog watchdog
 The remote sends nothing periodically while merely connected, so FluidNC infers liveness from
@@ -108,11 +117,13 @@ remote traffic:
 - **Ping** — FluidDial's `fnc_is_connected()` sends a `?` status request every
   `ping_interval_ms` (1500 ms) as a fallback keepalive. This must stay well below the 4 s
   idle timeout to avoid false-positive disconnects.
-- **Jog watchdog** — a button-held continuous jog is a single long `$J=` command followed by
-  radio silence, so FluidDial sends a `?` keepalive every 250 ms while the button is held
-  (`MultiJogScene`). FluidNC's `ESPNowClient::pollLine()` — armed **only during `State::Jog`** —
-  injects a `JogCancel` (0x85) if that keepalive stops for >500 ms, so a continuous jog can't
-  run away after a remote drops mid-jog.
+- **Jog watchdog** — a jog is a single `$J=` command followed by radio silence while the
+  move executes (a button-held continuous jog, or a single MPG/dial click of a long
+  distance), so FluidDial sends a `?` keepalive every 250 ms whenever the machine is in
+  `Jog` state (`MultiJogScene`). FluidNC's `ESPNowClient::pollLine()` — armed **only during
+  `State::Jog`** — injects a `JogCancel` (0x85) if that keepalive stops for >500 ms, so a
+  jog can't run away after a remote drops mid-jog. The keepalive must cover MPG jogs too:
+  without it, a long single-click move (e.g. 100 mm) gets cancelled mid-stroke.
 
 ### Connection lifecycle (FluidNC log messages)
 | Event | Log |
@@ -132,7 +143,7 @@ FluidNC can be on any 2.4 GHz channel. FluidDial finds it automatically:
    replies `[FluidNC: Connected id=N]`. FluidDial latches FluidNC's MAC and switches to unicast.
 
 While disconnected, `espnow_request_connect()` runs every ~6 s: it first retries cheaply on
-the current channel, and — throttled to once per 20 s — re-scans every channel. This handles a
+the current channel, and — throttled to once per 8 s — re-scans every channel. This handles a
 controller reboot that brings FluidNC back on a **different** WiFi channel; without the
 re-scan the remote would broadcast `Connect` on a dead channel forever.
 
@@ -161,7 +172,7 @@ occupied.
 | `src/SystemArduino.cpp` | Routes `fnc_putchar/getchar` through ESP-NOW when in wireless mode |
 | `src/HardwareM5Dial.cpp` | Calls `espnow_transport_init()` at startup |
 | `src/FluidNCModel.cpp` | Calls `espnow_request_connect()` on disconnect; `ping_interval_ms` keepalive; skips `$RI=` in ESP-NOW mode |
-| `src/MultiJogScene.cpp` | Sends a `?` keepalive every 250 ms during a button-held continuous jog |
+| `src/MultiJogScene.cpp` | Sends a `?` keepalive every 250 ms while the machine is in `Jog` state (covers button-held and MPG/dial jogs) |
 | `src/Drawing.h` / `src/Drawing.cpp` | `drawESPNowIndicator()` — ESP-NOW status icon |
 | `src/StatusScene.cpp` / `src/PieMenu.cpp` | Call `drawESPNowIndicator()` on round display |
 | `src/BrightnessScene.cpp` | Falls back to `statusScene` when `USE_WIFI` not defined |
@@ -169,7 +180,7 @@ occupied.
 ### FluidNC
 | File | Change |
 |------|--------|
-| `FluidNC/src/ESPNowServer.h/.cpp` | Radio init, `[FluidNC: ...]` frame parsing, multi-remote management with unique IDs, `ESPNowBroadcastChannel` |
+| `FluidNC/esp32/ESPNowServer.h/.cpp` | Radio init, `[FluidNC: ...]` frame parsing, multi-remote management with unique IDs; `ESPNowBroadcastChannel` with an `autoReport()` override for state-independent broadcasts; `broadcast_mode_rate` config item |
 | `FluidNC/src/ESPNowClient.h/.cpp` | Channel: RX ring, unicast TX, idle-timeout disconnect detection, jog watchdog in `pollLine()`, `reactivate()` for in-place reconnect |
 | `FluidNC/src/Machine/MachineConfig.h` | Added `ESPNowServer* _espnow_server` member |
 | `FluidNC/src/Machine/MachineConfig.cpp` | Added `handler.section("espnow_channel", ...)` (YAML key unchanged) |
