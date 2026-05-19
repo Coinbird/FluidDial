@@ -20,6 +20,9 @@
 #ifdef USE_WIFI
 #    include "WiFiConnection.h"
 #endif
+#ifdef USE_ESPNOW
+#    include "ESPNowTransport.h"
+#endif
 
 // This pin is connected to a photoresistor that is ostensibly used
 // for ambient light sensing.  It is possible to repurpose it as a UI
@@ -424,7 +427,11 @@ void init_hardware() {
     touch.begin(&display);
 
     init_encoder(enc_a, enc_b);
-#ifdef USE_WIFI
+#ifdef USE_ESPNOW
+    // Always init UART so espnow_transport_init() can listen for wired data.
+    init_fnc_uart(FNC_UART_NUM, PND_TX_FNC_RX_PIN, PND_RX_FNC_TX_PIN);
+    espnow_transport_init();  // detects wired vs wireless, inits ESP-NOW if needed
+#elif defined(USE_WIFI)
     if (wifi_use_uart_mode()) {
         init_fnc_uart(FNC_UART_NUM, PND_TX_FNC_RX_PIN, PND_RX_FNC_TX_PIN);
     }
