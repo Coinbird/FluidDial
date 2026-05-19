@@ -1,4 +1,4 @@
-// Copyright (c) 2024 FluidDial contributors
+// Copyright (c) 2026 FluidDial contributors
 // Use of this source code is governed by a GPLv3 license that can be found in the LICENSE file.
 
 #ifdef USE_ESPNOW

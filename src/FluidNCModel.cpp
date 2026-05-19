@@ -209,7 +209,7 @@ bool    awaiting_alarm = false;
 // Called once when status report received after being disconnected.
 // Use schedule_action() to defer execution to dispatch_events() in the main loop where the parser is idle and _report is clean.
 static void connect_init() {
-#ifndef USE_WIFI
+#if !defined(USE_WIFI) && !defined(USE_ESPNOW)
     fnc_realtime((realtime_cmd_t)0x0c);  // Ctrl-L - echo off (UART only)
 #endif
     send_line("$G");                     // Refresh GCode modes
