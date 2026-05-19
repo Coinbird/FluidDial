@@ -4,63 +4,83 @@ Connects a FluidDial M5Dial pendant to a FluidNC Controller (Only tested on V1E 
 using ESP-NOW for a transport layer, with automatic wired/wireless detection at boot.
 Potential to work with the CYD pendant and other FluidNC controllers.
 
-This is an "either/or" with the WiFi/websocket functionality (they could be selectable if
-there is enough space in memory).
+This is an "either/or" with the FluidDial WiFi/websocket functionality (ESP-NOW/ WiFi Mode could potentially be selectable if
+there is enough space in memory?)
 
 (CYD support is wired up — a `cyd_base` plus `_espnow` profiles — but is untested beyond
 compiling.)
 
+## Build Notes
+
+Using PlatformIO, build both the FluidDial and FluidNC forks that include the ESP-NOW additions.
+
+### FluidDial
+Use the `m5dial_espnow` profile (CYD profiles exist but are untested). Via VS Code PlatformIO UI, select that environment. Also build and upload the filesystem on first flash (it includes the ESP-NOW status icon).
+```
+pio run -e m5dial_espnow
+pio run -e m5dial_espnow -t upload
+# first time or after filesystem changes:
+pio run -e m5dial_espnow -t buildfs
+pio run -e m5dial_espnow -t uploadfs
+```
+
+### FluidNC
+Use the `wifi` or `wifi_s3` profile (only ones tested on Jackpot). Build and flash normally. Add the `espnow_channel:` stanza and update `I2S_STATIC` → `I2S` engine in `config.yaml` (see Configure section below).
+
+
 ## Terminology
 
-- **Controller** — the FluidNC machine controller (the Jackpot). The only "controller".
+- **Controller** — the FluidNC machine controller (tested on V1E Jackpot v1)
 - **Remote** — a pendant (FluidDial). FluidNC assigns each remote a unique numeric ID on
   connect (`id=1`, `id=2`, …).
 
 ## How it works
 
-ESP-NOW supports two addressing modes that this project uses for different purposes:
+ESP-NOW supports two addressing modes:
 
 - **Broadcast** (FF:FF:FF:FF:FF:FF) — fire-and-forget; any device on the same channel receives
   the frame. No acknowledgement, no retry. Used for channel discovery (`?` probe), the
   `[FluidNC: Connect]` handshake, and periodic status reports to display-only devices.
 - **Unicast** (specific MAC) — the 802.11 layer automatically acknowledges every frame and
-  retries on failure. Used for all GCode traffic once a remote connects. This makes the link
+  retries on failure. Used for all GCode traffic once a remote connects. This makes the ESP-NOW direct link
   substantially more reliable for jog and feed commands.
 
 At startup FluidDial scans channels until FluidNC responds, then sends `[FluidNC: Connect]`.
 FluidNC replies `[FluidNC: Connected id=N]`, both sides latch each other's MAC, and all
-subsequent traffic switches to unicast. The broadcast status channel stays active so
-display-only devices (no connection needed) keep receiving status updates.
+subsequent traffic switches to unicast. 
+
+The broadcast status channel stays active so display-only devices (no connection needed) keep receiving status updates, unless the broadcast_interval_ms is set to 0 (disables that feature.)
 
 ## Pairing sequence
 * See time sequence mermaid diagram at the bottom of this document.
 
 ## Hardware (as tested)
-- **Controller**: FluidNC Controller running FluidNC v4.0.3 (tested on [V1E Jackpot](https://docs.v1e.com/electronics/jackpot/))
+- **Controller**: FluidNC Controller running this branch of FluidNC (tested on [V1E Jackpot](https://docs.v1e.com/electronics/jackpot/)) This is a fork of the Portability branch.
 - **Pendant**: M5Dial (ESP32-S3) running FluidDial `m5dial_espnow` build
 
 ---
 ## Configure config.yaml
-Add this to the FluidNC `config.yaml` alongside the uart_channel sections:
-```yaml
-espnow_channel:
-  report_interval_ms: 100
-  broadcast_mode_rate: 200
-```
-- `report_interval_ms` — how often FluidNC pushes a status report to a *connected* remote
-  (e.g. FluidDial). 100–200 ms gives a responsive UI. In ESP-NOW mode FluidDial does **not**
-  send `$RI=` — the YAML value is authoritative.
-- `broadcast_mode_rate` — how often (ms) FluidNC broadcasts status as `[FluidNC: <...>]` for
-  passive display devices. Optional; **defaults to 200 ms** if omitted. Set to `0` to disable
-  broadcasting. Display devices are passive listeners — they never connect and never set this;
-  it is config-authoritative.
-
-Also, if you have I2S_STATIC in your `config.yaml`, change to:
+If you have I2S_STATIC in your `config.yaml`, change to:
 ```yaml
 stepping: 
   engine: I2S
 ```
 (This is a change from the Portability branch)
+
+
+For ESP-NOW support, add this to the FluidNC `config.yaml` alongside the uart_channel sections:
+```yaml
+espnow_channel:
+  report_interval_ms: 100
+  broadcast_interval_ms: 200
+```
+- `report_interval_ms` — how often FluidNC pushes a status report to a *connected* remote
+  (e.g. FluidDial). 100–200 ms gives a responsive UI. In ESP-NOW mode FluidDial does **not**
+  send `$RI=` — the YAML value is authoritative.
+- `broadcast_interval_ms` — how often (ms) FluidNC broadcasts status as `[FluidNC: <...>]` for
+  passive display devices. Optional; **defaults to 200 ms** if omitted. Set to `0` to disable
+  broadcasting. Display devices are passive listeners — they never connect and never set this;
+  it is config-authoritative.
 
 ---
 ## Architecture notes
@@ -86,8 +106,8 @@ once connected.
 | `[FluidNC: Connected id=N]` | FluidNC → Remote | Confirmed; remote ID N assigned, MAC latched for unicast |
 | `[FluidNC: Busy]` | FluidNC → Remote | All 4 remote slots occupied |
 | `[FluidNC: Disconnect]` | Remote → FluidNC | Release the slot (graceful disconnect; optional) |
-| `[FluidNC: <Idle\|...>]` | FluidNC → all | Periodic broadcast status (display mode), gated by `broadcast_mode_rate` |
-| `[FluidNC: ?]` | FluidNC → all | Reply to a `?` channel probe from an unconnected device |
+| `[FluidNC: <Idle\|...>]` | FluidNC → all | Periodic broadcast status (display mode), gated by `broadcast_interval_ms` |
+| `[FluidNC: ?]` | FluidNC → all | Broadcast "I'm here" reply to a bare `?` probe — used by FluidDial during WiFi channel scanning to confirm FluidNC is alive on a given channel before attempting to connect |
 
 ### FluidNC side (`ESPNowServer` + `ESPNowClient` + `ESPNowBroadcastChannel`)
 Split into classes following the TelnetServer/TelnetClient pattern:
@@ -100,13 +120,13 @@ Split into classes following the TelnetServer/TelnetClient pattern:
   reconnecting remote reuses its existing object via `reactivate()` (deleting a `Channel` from
   the ESP-NOW recv callback would race the main task's channel poll). TX is always unicast.
 - **`ESPNowBroadcastChannel`** (`Channel`, internal to `ESPNowServer.cpp`): registered with
-  `allChannels`; broadcasts status as `[FluidNC: <...>]` every `broadcast_mode_rate` ms.
+  `allChannels`; broadcasts status as `[FluidNC: <...>]` every `broadcast_interval_ms` ms.
   It **overrides `autoReport()`** to drop the base class's motion-state gate — the base
   `Channel::autoReport()` only emits periodic reports while the machine is *moving*
   (Cycle/Homing/Jog), so a passive display would see nothing while the machine sits idle.
   The override emits a full status report unconditionally at the configured interval.
   Enables any number of display-only devices with no connection required; disabled when
-  `broadcast_mode_rate` is 0.
+  `broadcast_interval_ms` is 0.
 
 ### Keepalive, disconnect detection, and the jog watchdog
 The remote sends nothing periodically while merely connected, so FluidNC infers liveness from
@@ -124,11 +144,15 @@ remote traffic:
   `State::Jog`** — injects a `JogCancel` (0x85) if that keepalive stops for >500 ms, so a
   jog can't run away after a remote drops mid-jog. The keepalive must cover MPG jogs too:
   without it, a long single-click move (e.g. 100 mm) gets cancelled mid-stroke.
+  The watchdog only fires if the pendant sent a packet **after** the current jog started,
+  so jogging from the WebUI or over UART is unaffected — those channels never feed
+  `_last_rx_ms` and the guard condition stays false for the duration of the move.
 
 ### Connection lifecycle (FluidNC log messages)
 | Event | Log |
 |-------|-----|
-| Server ready | `espnow: server ready (broadcast status active; waiting for remotes)` |
+| Server ready (broadcast enabled) | `espnow: server ready (broadcasting status every N ms)` |
+| Server ready (broadcast disabled) | `espnow: server ready (broadcast disabled; waiting for remotes)` |
 | New remote connects | `espnow: remote (id=N) connected` |
 | Remote reconnects (object reused) | `espnow: remote (id=N) reconnected` |
 | Remote times out / sends Disconnect | `espnow: remote (id=N) disconnected` |
@@ -180,7 +204,7 @@ occupied.
 ### FluidNC
 | File | Change |
 |------|--------|
-| `FluidNC/esp32/ESPNowServer.h/.cpp` | Radio init, `[FluidNC: ...]` frame parsing, multi-remote management with unique IDs; `ESPNowBroadcastChannel` with an `autoReport()` override for state-independent broadcasts; `broadcast_mode_rate` config item |
+| `FluidNC/esp32/ESPNowServer.h/.cpp` | Radio init, `[FluidNC: ...]` frame parsing, multi-remote management with unique IDs; `ESPNowBroadcastChannel` with an `autoReport()` override for state-independent broadcasts; `broadcast_interval_ms` config item |
 | `FluidNC/src/ESPNowClient.h/.cpp` | Channel: RX ring, unicast TX, idle-timeout disconnect detection, jog watchdog in `pollLine()`, `reactivate()` for in-place reconnect |
 | `FluidNC/src/Machine/MachineConfig.h` | Added `ESPNowServer* _espnow_server` member |
 | `FluidNC/src/Machine/MachineConfig.cpp` | Added `handler.section("espnow_channel", ...)` (YAML key unchanged) |
@@ -188,25 +212,7 @@ occupied.
 
 ---
 
-## Build Notes
-
-### FluidDial
-* Same as normal through the VS Code PlatformIO UI, just be sure to use the `m5dial_espnow`
-  profile.
-* Also build and upload the filesystem, which has a PNG icon for ESP-NOW mode.
-* Manual way:
-```
-pio run -e m5dial_espnow
-pio run -e m5dial_espnow -t upload
-# for filesystem changes, or first time:
-pio run -e m5dial_espnow -t buildfs
-pio run -e m5dial_espnow -t uploadfs
-```
-
-### FluidNC
-Build and flash normally for the Jackpot; add the `espnow_channel:` stanza and change I2S_STATIC to I2S for the engine in `config.yaml` (see above). 
-
-### Time Sequence Diagrams
+## Time Sequence Diagrams
 
 Solid arrows = **unicast** (802.11 ACK/retry); dashed arrows = **broadcast** (fire-and-forget).
 
