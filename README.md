@@ -3,7 +3,7 @@
 ### This fork adds <img src="data/espnow.png" width="70"> (https://www.espressif.com/en/solutions/low-power-solutions/esp-now) protocol support for direct connection to the FluidNC board, wirelessly, without relying on a WiFi connection.
 ### See FluidDial/README-ESP-NOW.md for details
 
-### Currently only tested on a V1E.com Jackpot v1 controller M5Dial.
+### Primarily tested on a V1E.com Jackpot v1 controller + M5Dial. Initial tests indicate this also works for a Jackpot v2 + CYD.
 
 <img src="http://wiki.fluidnc.com/hardware/fd1.png" alt="M5 Fluid Dial" height="500"><img src="http://wiki.fluidnc.com/cydpendant.jpg" alt="CYD Dial Pendant" height="500">
 
