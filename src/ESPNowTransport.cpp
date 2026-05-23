@@ -234,7 +234,7 @@ static uint8_t scan_for_channel() {
             return ch;
         }
     }
-    return 1;  // fallback; user can reboot once FluidNC is visible
+    return 0;  // not found — caller keeps the current channel (don't strand us)
 }
 
 static void connect_to_server() {
@@ -286,11 +286,17 @@ void espnow_request_connect() {
     last_full_scan = now;
 
     uint8_t locked = scan_for_channel();
-    esp_wifi_set_channel(locked, WIFI_SECOND_CHAN_NONE);
-    if (_espnow_nvs) {
-        nvs_set_i32(_espnow_nvs, "channel", static_cast<int>(locked));
+    if (locked >= 1 && locked <= 13) {
+        // Found the controller on a (possibly new) channel — lock to it.
+        esp_wifi_set_channel(locked, WIFI_SECOND_CHAN_NONE);
+        if (_espnow_nvs) {
+            nvs_set_i32(_espnow_nvs, "channel", static_cast<int>(locked));
+        }
+        connect_to_server();
     }
-    connect_to_server();
+    // else: scan found nothing (still out of range / controller off). Keep the
+    // current channel and NVS cache so the next cheap retry — and the moment we
+    // walk back into range — still targets the correct channel.
 }
 
 int espnow_pendant_id() {
@@ -339,9 +345,21 @@ static void init_radio() {
 
     _espnow_nvs    = nvs_init("espnow");
     uint8_t locked = scan_for_channel();
-    esp_wifi_set_channel(locked, WIFI_SECOND_CHAN_NONE);
-    if (_espnow_nvs) {
-        nvs_set_i32(_espnow_nvs, "channel", static_cast<int>(locked));
+    if (locked < 1 || locked > 13) {
+        // Controller not found at boot (powered off / out of range). Stay on the
+        // cached channel if we have a valid one, else default to 1 — but do NOT
+        // overwrite the cache, so a known-good channel survives a controller-off boot.
+        int32_t cached = 0;
+        if (_espnow_nvs) {
+            nvs_get_i32(_espnow_nvs, "channel", &cached);
+        }
+        locked = (cached >= 1 && cached <= 13) ? static_cast<uint8_t>(cached) : 1;
+        esp_wifi_set_channel(locked, WIFI_SECOND_CHAN_NONE);
+    } else {
+        esp_wifi_set_channel(locked, WIFI_SECOND_CHAN_NONE);
+        if (_espnow_nvs) {
+            nvs_set_i32(_espnow_nvs, "channel", static_cast<int>(locked));
+        }
     }
 
     connect_to_server();
