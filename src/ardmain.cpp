@@ -60,7 +60,11 @@ void setup() {
 
     dbg_printf("FluidNC Pendant %s\n", git_info);
 
-#ifndef USE_WIFI
+#if defined(USE_ESPNOW)
+    // ESP-NOW establishes its own link in espnow_transport_init() (channel scan
+    // + [FluidNC: Connect] handshake), so the UART-oriented boot probe doesn't
+    // apply. Skipping it restores the pre-merge ESP-NOW boot path.
+#elif !defined(USE_WIFI)
     // Bounded boot probe — discards stale bootloader noise, asks FluidNC
     // for a status report, waits up to 7 s for any RX byte. If it times
     // out the runtime recovery ladder in fnc_is_connected() takes over.

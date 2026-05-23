@@ -72,14 +72,43 @@ void PieMenu::menuBackground() {
     background();
     text(selectedItem()->name(), { 0, round_display ? -20 : -15 }, WHITE, SMALL);
     drawStatusSmall(round_display ? 95 : 90);
-#ifdef USE_WIFI
+#if defined(USE_WIFI) || defined(USE_M5)
     if (round_display) {
-        // On M5 Dial, show WiFi signal centered just above the status badge (y=90).
-        drawWiFiSignalBars((display_short_side() - 18) / 2, 87);
+        constexpr int wifi_w = 18, batt_w = 24, gap = 5;
+#    if defined(USE_WIFI) && defined(USE_M5)
+        // WiFi M5Dial: WiFi bars + battery, side by side, centered above the status badge.
+        bool has_battery = battery_level() >= 0;
+        int  total_w     = wifi_w + (has_battery ? gap + batt_w : 0);
+        int  x           = (display_short_side() - total_w) / 2;
+        drawWiFiSignalBars(x, 87);
+        if (has_battery) {
+            drawBatteryLevel(x + wifi_w + gap, 87);
+        }
+#    elif defined(USE_WIFI)
+        drawWiFiSignalBars((display_short_side() - wifi_w) / 2, 87);
+#    elif !defined(USE_ESPNOW)
+        // USE_M5-only (non-WiFi, non-ESP-NOW): battery alone, centered.
+        if (battery_level() >= 0) {
+            drawBatteryLevel((display_short_side() - batt_w) / 2, 87);
+        }
+#    endif
     }
 #endif
 #ifdef USE_ESPNOW
-    drawESPNowIndicator((display_short_side() - 70) / 2, round_display ? 95 : 90);
+    if (round_display) {
+        // M5Dial ESP-NOW: ESP-NOW logo + battery, side by side and centered
+        // (mirrors the WiFi-bars + battery row on a WiFi M5Dial).
+        constexpr int espnow_w = 70, batt_w = 24, gap = 5;
+        bool has_battery = battery_level() >= 0;
+        int  total_w     = espnow_w + (has_battery ? gap + batt_w : 0);
+        int  x           = (display_short_side() - total_w) / 2;
+        drawESPNowIndicator(x, 95);
+        if (has_battery) {
+            drawBatteryLevel(x + espnow_w + gap, 90);
+        }
+    } else {
+        drawESPNowIndicator((display_short_side() - 70) / 2, 90);
+    }
 #endif
 }
 

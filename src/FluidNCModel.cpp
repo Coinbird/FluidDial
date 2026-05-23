@@ -445,7 +445,10 @@ static void recover_link(int tick) {
     flush_fnc_rx(20);
     request_status_report();
     if (tick == 3) {
-#ifdef USE_WIFI
+#if defined(USE_ESPNOW)
+        // ESP-NOW recovery is handled by espnow_request_connect() in
+        // fnc_is_connected(); the UART driver re-init does not apply.
+#elif defined(USE_WIFI)
         if (wifi_use_uart_mode()) {
             bootlog_printf("recover: re-init uart");
             reinit_fnc_uart();
