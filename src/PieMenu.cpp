@@ -96,17 +96,21 @@ void PieMenu::menuBackground() {
 #endif
 #ifdef USE_ESPNOW
     if (round_display) {
-        // M5Dial ESP-NOW: ESP-NOW logo + battery, side by side and centered
-        // (mirrors the WiFi-bars + battery row on a WiFi M5Dial).
-        constexpr int espnow_w = 70, batt_w = 24, gap = 5;
+        // M5Dial ESP-NOW: [signal bars] [ESP-NOW logo] [battery], centered as a
+        // row (mirrors the WiFi-bars + battery row on a WiFi M5Dial).
+        constexpr int bars_w = 18, espnow_w = 70, batt_w = 24, gap = 5;
         bool has_battery = battery_level() >= 0;
-        int  total_w     = espnow_w + (has_battery ? gap + batt_w : 0);
+        int  total_w     = bars_w + gap + espnow_w + (has_battery ? gap + batt_w : 0);
         int  x           = (display_short_side() - total_w) / 2;
-        drawESPNowIndicator(x, 95);
+        drawESPNowSignalBars(x, 95);
+        drawESPNowIndicator(x + bars_w + gap, 95);
         if (has_battery) {
-            drawBatteryLevel(x + espnow_w + gap, 90);
+            drawBatteryLevel(x + bars_w + gap + espnow_w + gap, 90);
         }
     } else {
+        // CYD: bars top-left (like the WiFi overlay), logo centered; battery is
+        // drawn top-right by the global overlay in refreshDisplay().
+        drawESPNowSignalBars(5, 20);
         drawESPNowIndicator((display_short_side() - 70) / 2, 90);
     }
 #endif

@@ -418,6 +418,26 @@ void drawESPNowIndicator(int x0, int y_bot) {
     canvas.drawPngFile(LittleFS, "/espnow.png", x0, y_bot - 20, 70, 20, 0, 0, 0.0f, 0.0f, datum_t::top_left);
 }
 
+// 4-bar ESP-NOW link-quality indicator (same style as the WiFi bars). The bar
+// count comes from espnow_link_quality(), a rolling unicast-ACK success proxy
+// (raw RSSI isn't exposed by the recv callback on this Arduino core). Hidden in
+// wired UART mode.
+void drawESPNowSignalBars(int x0, int y_bot) {
+    if (espnow_use_uart_mode()) {
+        return;
+    }
+    int bars = espnow_link_quality();  // 0–4
+
+    static constexpr int W   = 3;
+    static constexpr int GAP = 2;
+    static const     int H[] = { 4, 7, 10, 13 };
+
+    for (int i = 0; i < 4; i++) {
+        int color = (i < bars) ? GREEN : DARKGREY;
+        canvas.fillRect(x0 + i * (W + GAP), y_bot - H[i], W, H[i], color);
+    }
+}
+
 #endif
 
 void refreshDisplay() {

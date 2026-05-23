@@ -33,8 +33,23 @@ static uint32_t         _tx_drops = 0;
 
 static constexpr int kMaxInflight = 4;  // ESP-NOW internal queue is ~7
 
-static void on_send(const uint8_t* /*mac*/, esp_now_send_status_t /*status*/) {
+// Rolling link-quality estimate, derived from unicast ACK success.
+// Fixed-point EMA in [0..1000]. Written in the WiFi task (on_send), read in the
+// main task (espnow_link_quality). Starts optimistic so a fresh link shows full.
+static std::atomic<int> _link_quality { 1000 };
+
+static void on_send(const uint8_t* mac, esp_now_send_status_t status) {
     _tx_inflight.fetch_sub(1, std::memory_order_relaxed);
+    // Only unicast frames are ACK'd by the 802.11 layer. Broadcast always
+    // reports SUCCESS on transmit (no ACK expected) and would skew the
+    // estimate, so exclude it.
+    if (memcmp(mac, kBroadcast, 6) == 0) {
+        return;
+    }
+    int sample = (status == ESP_NOW_SEND_SUCCESS) ? 1000 : 0;
+    int q      = _link_quality.load(std::memory_order_relaxed);
+    q += (sample - q) >> 3;  // exponential moving average, alpha = 1/8
+    _link_quality.store(q, std::memory_order_relaxed);
 }
 
 static void flush_tx() {
@@ -146,6 +161,9 @@ static void on_recv(const uint8_t* mac, const uint8_t* data, int len) {
             const char* id_str = strstr(reinterpret_cast<const char*>(data + kPrefixLen), "id=");
             _pendant_id        = id_str ? atoi(id_str + 3) : 0;
             _connected         = true;
+            // Fresh link — reset the quality EMA to optimistic so a reconnect
+            // doesn't linger at the low value it decayed to while down.
+            _link_quality.store(1000, std::memory_order_relaxed);
         }
         // All other [FluidNC: ...] frames (Busy, broadcast status, etc.) are
         // silently ignored on the controller side.
@@ -277,6 +295,26 @@ void espnow_request_connect() {
 
 int espnow_pendant_id() {
     return _pendant_id;
+}
+
+// 0..4 "bars" derived from the rolling unicast-ACK success EMA. Returns 0 when
+// running in wired UART mode (no wireless link to rate).
+int espnow_link_quality() {
+    // Not on ESP-NOW, or not currently connected → no bars. Without the
+    // _connected gate the EMA would freeze full when the link drops (sends
+    // switch to broadcast, which is excluded from the estimate).
+    if (_uart_mode || !_connected) {
+        return 0;
+    }
+    // Thresholds chosen so one isolated dropped frame (EMA dips ~125 from full
+    // at alpha=1/8) still shows 4 bars; sustained loss pulls it down. Tune to
+    // taste on real hardware.
+    int q = _link_quality.load(std::memory_order_relaxed);
+    if (q >= 800) return 4;
+    if (q >= 600) return 3;
+    if (q >= 400) return 2;
+    if (q >= 150) return 1;
+    return 0;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

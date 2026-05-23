@@ -93,6 +93,7 @@ void drawWiFiSignalBars(int x0, int y_bot);
 
 #ifdef USE_ESPNOW
 void drawESPNowIndicator(int x0, int y_bot);
+void drawESPNowSignalBars(int x0, int y_bot);
 #endif
 
 #if defined(USE_M5) || defined(USE_LOVYANGFX)

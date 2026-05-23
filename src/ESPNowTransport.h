@@ -28,4 +28,9 @@ void espnow_request_connect();
 // Returns the pendant ID assigned by FluidNC (0 = not yet connected).
 int espnow_pendant_id();
 
+// Returns 0..4 signal "bars" derived from a rolling average of unicast ACK
+// success — a link-quality proxy (the ESP-NOW recv callback on this Arduino
+// core does not expose raw RSSI). 0 in wired UART mode.
+int espnow_link_quality();
+
 #endif  // USE_ESPNOW
