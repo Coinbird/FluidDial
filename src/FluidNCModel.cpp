@@ -347,9 +347,9 @@ int next_ping_ms  = 0;
 // ping interval must stay well below that to avoid false-positive timeouts.
 const int ping_interval_ms = 1500;
 
-// If we haven't heard from FluidNC in 6 seconds for any reason, declare
+// If we haven't heard from FluidNC in 2 seconds for any reason, declare
 // FluidNC unresponsive.
-const int disconnect_interval_ms = 6000;
+const int disconnect_interval_ms = 2000;
 
 bool starting = true;
 
