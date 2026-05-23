@@ -95,6 +95,10 @@ void drawWiFiSignalBars(int x0, int y_bot);
 void drawESPNowIndicator(int x0, int y_bot);
 #endif
 
+#if defined(USE_M5) || defined(USE_LOVYANGFX)
+void drawBatteryLevel(int x0, int y_bot);
+#endif
+
 void refreshDisplay();
 
 void drawError();

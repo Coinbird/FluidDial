@@ -41,6 +41,14 @@ static inline uint32_t millis() { return m5gfx::millis(); }
 #    endif
 #endif  // USE_M5
 
+int  battery_level();    // Returns 0-100, or -1 if no battery
+bool battery_charging(); // Returns true while charging via USB
+#ifdef USE_LOVYANGFX
+int adc_millivolts(int pin);
+int battery_adc_millivolts();
+int battery_millivolts();
+#endif
+
 extern LGFX_Device&     display;
 extern LGFX_Sprite      canvas;
 extern m5::Touch_Class& touch;
@@ -63,6 +71,11 @@ void update_events();
 void delay_ms(uint32_t ms);
 
 void resetFlowControl();
+
+// Re-initialize the FluidNC UART driver. Hardware-specific; called from the
+// link-recovery ladder in fnc_is_connected() when the link has gone silent
+// long enough that draining + re-probing didn't help.
+void reinit_fnc_uart();
 
 extern bool round_display;
 

@@ -201,6 +201,7 @@ extern "C" int fnc_getchar() {
 extern "C" void poll_extra() {}
 
 void resetFlowControl() {}
+void reinit_fnc_uart() {}
 
 void dbg_write(uint8_t c) {
     putchar(c);
@@ -330,8 +331,11 @@ nvs_handle_t nvs_init(const char* name) {
     return strdup(dname);
 }
 
-int  battery_level()    { return 75; }
-bool battery_charging() { return true; }
+int  battery_level()           { return 75; }
+bool battery_charging()        { return true; }
+int  adc_millivolts(int pin)   { return (pin == 39) ? 2484 : 0; }
+int  battery_adc_millivolts()  { return adc_millivolts(39); }
+int  battery_millivolts()      { return 3810; }
 
 #ifdef USE_WIFI
 static WiFiConfig _preview_cfg = { "FluidNC", "", "192.168.0.1", true };

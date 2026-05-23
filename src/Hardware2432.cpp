@@ -31,7 +31,24 @@
 // CYD that is supposed to control battery charging, cutting the
 // traces that connect it to the battery circuit and running a wire
 // over to the photoresistor.
+#ifdef PIBOT_PENDANT
+// PiBot uses GPIO 34 for the band switch, not a lockout input.
+int lockout_pin = -1;
+#else
 int lockout_pin = GPIO_NUM_34;
+#endif
+
+#ifdef CYD_BATTERY_ADC
+#    ifndef CYD_BATTERY_ADC_PIN
+#        define CYD_BATTERY_ADC_PIN GPIO_NUM_39
+#    endif
+#    ifndef CYD_BATTERY_ADC_MULTIPLIER_NUM
+#        define CYD_BATTERY_ADC_MULTIPLIER_NUM 1534
+#    endif
+#    ifndef CYD_BATTERY_ADC_MULTIPLIER_DEN
+#        define CYD_BATTERY_ADC_MULTIPLIER_DEN 1000
+#    endif
+#endif
 
 m5::Touch_Class  xtouch;
 m5::Touch_Class& touch = xtouch;
@@ -128,6 +145,9 @@ static void init_panel_st7789() {
     cfg.pin_cs          = GPIO_NUM_15;
     cfg.offset_rotation = base_rotation;
     cfg.bus_shared      = false;
+#ifdef PIBOT_PENDANT
+    cfg.invert = true;
+#endif
     p.config(cfg);
 
     p.light(&light);
@@ -145,6 +165,9 @@ static void init_panel_ili9341() {
     cfg.pin_cs          = GPIO_NUM_15;
     cfg.offset_rotation = base_rotation;
     cfg.bus_shared      = false;
+#ifdef PIBOT_PENDANT
+    cfg.invert = true;
+#endif
     p.config(cfg);
 
     p.light(&light);
@@ -163,10 +186,33 @@ int green_button_pin = -1;
 int enc_a, enc_b;
 
 #ifdef CAPACITIVE_CYD
+#    ifdef PIBOT_PENDANT
+lgfx::Touch_FT5x06 _touch_ft5x06;
+#    else
 lgfx::Touch_CST816S _touch_cst816s;
+#    endif
 
 void init_capacitive_cyd() {
     {
+#    ifdef PIBOT_PENDANT
+        // PiBot Pendant V4: FT5x06 capacitive touch on I2C bus 1.
+        auto cfg            = _touch_ft5x06.config();
+        cfg.i2c_port        = I2C_NUM_1;
+        cfg.pin_sda         = GPIO_NUM_32;
+        cfg.pin_scl         = GPIO_NUM_25;
+        cfg.pin_int         = GPIO_NUM_36;
+        cfg.pin_rst         = -1;
+        cfg.offset_rotation = base_rotation;
+        cfg.freq            = 400000;
+        cfg.x_min           = 0;
+        cfg.x_max           = 239;
+        cfg.y_min           = 0;
+        cfg.y_max           = 319;
+        cfg.bus_shared      = false;
+        _touch_ft5x06.config(cfg);
+        display.getPanel()->setTouch(&_touch_ft5x06);
+        display.getPanel()->initTouch();
+#    else
         auto cfg            = _touch_cst816s.config();
         cfg.i2c_port        = I2C_NUM_0;
         cfg.pin_sda         = GPIO_NUM_33;
@@ -180,12 +226,27 @@ void init_capacitive_cyd() {
         _touch_cst816s.config(cfg);
         display.getPanel()->setTouch(&_touch_cst816s);
         display.getPanel()->initTouch();
+#    endif
     }
     setBacklightPin(GPIO_NUM_27);
 
+#ifdef CYD_BATTERY_ADC
+    analogSetPinAttenuation(CYD_BATTERY_ADC_PIN, ADC_11db);
+#endif
     pinMode(lockout_pin, INPUT);
 
-#    ifdef CYD_BUTTONS
+#    ifdef PIBOT_PENDANT
+    // PiBot Pendant V4 wiring: encoder B on GPIO 27, and the dial/green
+    // RGB-LED pins are swapped vs the stock CYD button layout.
+    enc_a            = GPIO_NUM_22;
+    enc_b            = GPIO_NUM_27;
+    red_button_pin   = GPIO_NUM_4;   // RGB LED Red
+    dial_button_pin  = GPIO_NUM_16;  // RGB LED Green (PiBot dial)
+    green_button_pin = GPIO_NUM_17;  // RGB LED Blue  (PiBot green)
+    pinMode(red_button_pin, INPUT_PULLUP);
+    pinMode(dial_button_pin, INPUT_PULLUP);
+    pinMode(green_button_pin, INPUT_PULLUP);
+#    elif defined(CYD_BUTTONS)
     enc_a = GPIO_NUM_22;
     enc_b = GPIO_NUM_21;
     // rotary_button_pin = GPIO_NUM_35;
@@ -235,6 +296,9 @@ void init_resistive_cyd() {
     red_button_pin   = GPIO_NUM_4;   // RGB LED Red
     dial_button_pin  = GPIO_NUM_17;  // RGB LED Blue
     green_button_pin = GPIO_NUM_16;  // RGB LED Green
+    pinMode(red_button_pin, INPUT_PULLUP);
+    pinMode(dial_button_pin, INPUT_PULLUP);
+    pinMode(green_button_pin, INPUT_PULLUP);
 #    else
     red_button_pin = dial_button_pin = green_button_pin = -1;
 #    endif
@@ -449,6 +513,10 @@ void init_hardware() {
 #endif
 }
 
+void reinit_fnc_uart() {
+    init_fnc_uart(FNC_UART_NUM, PND_TX_FNC_RX_PIN, PND_RX_FNC_TX_PIN);
+}
+
 int last_locked = -1;
 
 void redrawButtons() {
@@ -497,35 +565,46 @@ void system_background() {
     drawBackground(BLACK);
 }
 
+static constexpr int32_t BUTTON_DEBOUNCE_MS = 50;
+
 bool switch_button_touched(bool& pressed, int& button) {
-    static int last_red   = -1;
-    static int last_green = -1;
-    static int last_dial  = -1;
-    bool       state;
+    static int     last_red    = -1;
+    static int     last_green  = -1;
+    static int     last_dial   = -1;
+    static int32_t expire_red   = 0;
+    static int32_t expire_dial  = 0;
+    static int32_t expire_green = 0;
+
+    int32_t now = (int32_t)milliseconds();
+    bool    state;
+
     if (red_button_pin != -1) {
         state = digitalRead(red_button_pin);
-        if ((int)state != last_red) {
-            last_red = state;
-            button   = 0;
-            pressed  = !state;
+        if ((int)state != last_red && (now - expire_red) >= 0) {
+            last_red   = state;
+            expire_red = now + BUTTON_DEBOUNCE_MS;
+            button     = 0;
+            pressed    = !state;
             return true;
         }
     }
     if (dial_button_pin != -1) {
         state = digitalRead(dial_button_pin);
-        if ((int)state != last_dial) {
-            last_dial = state;
-            button    = 1;
-            pressed   = !state;
+        if ((int)state != last_dial && (now - expire_dial) >= 0) {
+            last_dial   = state;
+            expire_dial = now + BUTTON_DEBOUNCE_MS;
+            button      = 1;
+            pressed     = !state;
             return true;
         }
     }
     if (green_button_pin != -1) {
         state = digitalRead(green_button_pin);
-        if ((int)state != last_green) {
-            last_green = state;
-            button     = 2;
-            pressed    = !state;
+        if ((int)state != last_green && (now - expire_green) >= 0) {
+            last_green   = state;
+            expire_green = now + BUTTON_DEBOUNCE_MS;
+            button       = 2;
+            pressed      = !state;
             return true;
         }
     }
@@ -535,12 +614,6 @@ bool switch_button_touched(bool& pressed, int& button) {
 bool screen_encoder(int x, int y, int& delta) {
     return false;
 }
-
-struct button_debounce_t {
-    bool    debouncing;
-    bool    skipped;
-    int32_t timeout;
-} debounce[n_buttons] = { { false, false, 0 } };
 
 bool    touch_debounce = false;
 int32_t touch_timeout  = 0;
@@ -595,5 +668,104 @@ void update_events() {
 }
 
 void ackBeep() {}
+
+int adc_millivolts(int pin) {
+    return analogReadMilliVolts(pin);
+}
+
+int battery_adc_millivolts() {
+#ifndef CYD_BATTERY_ADC
+    return -1;
+#else
+    return adc_millivolts(CYD_BATTERY_ADC_PIN);
+#endif
+}
+
+int battery_millivolts() {
+#ifndef CYD_BATTERY_ADC
+    return -1;
+#else
+    return (battery_adc_millivolts() * CYD_BATTERY_ADC_MULTIPLIER_NUM) / CYD_BATTERY_ADC_MULTIPLIER_DEN;
+#endif
+}
+
+int battery_level() {
+#ifndef CYD_BATTERY_ADC
+    return -1;
+#else
+    static int      cached_level  = -1;
+    static int      smoothed_mv   = -1;
+    static uint32_t next_read_ms  = 0;
+
+#    if defined(RESISTIVE_CYD) && defined(CAPACITIVE_CYD)
+    if (display_num == 1) {
+        return -1;
+    }
+#    endif
+
+    uint32_t now = millis();
+    if (now < next_read_ms) {
+        return cached_level;
+    }
+    next_read_ms = now + 1000;
+
+    int millivolts = battery_millivolts();
+    if (millivolts < 3000 || millivolts > 4400) {
+        return cached_level;
+    }
+
+    // Exponential moving average (alpha=0.25)
+    smoothed_mv = (smoothed_mv < 3000) ? millivolts : (smoothed_mv * 3 + millivolts) / 4;
+    millivolts  = smoothed_mv;
+
+    struct LevelPoint {
+        int mv;
+        int pct;
+    };
+    static constexpr LevelPoint curve[] = {
+        { 4200, 100 },
+        { 4100, 90 },
+        { 4000, 80 },
+        { 3930, 70 },
+        { 3860, 60 },
+        { 3800, 50 },
+        { 3750, 40 },
+        { 3700, 30 },
+        { 3650, 20 },
+        { 3550, 10 },
+        { 3300, 0 },
+    };
+
+    if (millivolts >= curve[0].mv) {
+        cached_level = 100;
+        return cached_level;
+    }
+    for (size_t i = 1; i < sizeof(curve) / sizeof(curve[0]); ++i) {
+        if (millivolts >= curve[i].mv) {
+            int high_mv  = curve[i - 1].mv;
+            int low_mv   = curve[i].mv;
+            int high_pct = curve[i - 1].pct;
+            int low_pct  = curve[i].pct;
+            cached_level = low_pct + ((millivolts - low_mv) * (high_pct - low_pct)) / (high_mv - low_mv);
+            return cached_level;
+        }
+    }
+
+    cached_level = 0;
+    return cached_level;
+#endif
+}
+
+bool battery_charging() {
+#ifndef CYD_BATTERY_ADC
+    return false;
+#else
+    static int cached = -1;
+    if (cached < 0) {
+        cached = (battery_millivolts() > 4250) ? 1 : 0;
+    }
+    return cached == 1;
+#endif
+}
 
 void deep_sleep(int us) {}

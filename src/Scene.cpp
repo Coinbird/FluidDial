@@ -106,8 +106,10 @@ void dispatch_touch() {
             return;
         }
         int button;
-        if (screen_button_touched(t.state == m5::touch_state_t::touch, t.x, t.y, button)) {
-            if (t.state == m5::touch_state_t::touch) {
+       
+        bool btn_touching = (t.state & m5::touch_state_t::mask_touch) != 0;
+        if (screen_button_touched(btn_touching, t.x, t.y, button)) {
+            if (t.state == m5::touch_state_t::touch_begin) {
                 dispatch_button(true, button);
             } else if (t.state == m5::touch_state_t::none) {
                 dispatch_button(false, button);
@@ -155,6 +157,31 @@ ActionHandler action = nullptr;
 
 void schedule_action(ActionHandler _action) {
     action = _action;
+}
+
+// Coalesced redraw bookkeeping. See Scene.h for rationale.
+static volatile bool s_redisplay_dirty   = false;
+static uint32_t      s_last_redisplay_ms = 0;
+
+void request_redisplay() {
+    s_redisplay_dirty = true;
+}
+
+void service_redisplay() {
+    if (!s_redisplay_dirty) {
+        return;
+    }
+    uint32_t now = millis();
+    // Cap UI refresh to UPDATE_RATE_MS (~30 ms). Multiple parser callbacks
+    // in the same window collapse to one reDisplay.
+    if ((int32_t)(now - s_last_redisplay_ms) < (int32_t)UPDATE_RATE_MS) {
+        return;
+    }
+    s_redisplay_dirty   = false;
+    s_last_redisplay_ms = now;
+    if (current_scene) {
+        current_scene->reDisplay();
+    }
 }
 
 void dispatch_events() {

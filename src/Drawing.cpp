@@ -148,7 +148,7 @@ void drawStatus() {
             line1   = "AP Setup";
             line2   = "192.168.4.1";
         } else if (wifi_is_connected()) {
-            bgColor = YELLOW;       // WiFi up, WebSocket still connecting
+            bgColor = YELLOW;       // WiFi up, Telnet still connecting
             line1   = "FluidNC";
             static const char* nc_frames[] = { "Connecting", "Connecting.", "Connecting..", "Connecting..." };
             line2   = nc_frames[(millis() / 400) % 4];
@@ -203,7 +203,7 @@ void drawStatusSmall(int y) {
             bgColor = 0x8400;   // dark orange
             label   = "AP Mode";
         } else if (wifi_is_connected()) {
-            bgColor = YELLOW;   // WiFi up, WebSocket still connecting
+            bgColor = YELLOW;   // WiFi up, Telnet still connecting
             static const char* nc_frames[] = { "FluidNC", "FluidNC.", "FluidNC..", "FluidNC..." };
             label   = nc_frames[(millis() / 400) % 4];
         } else {
@@ -354,7 +354,51 @@ void drawWiFiSignalBars(int x0, int y_bot) {
         canvas.fillRect(x0 + i * (W + GAP), y_bot - H[i], W, H[i], color);
     }
 }
+#endif
 
+#if defined(USE_M5) || defined(USE_LOVYANGFX)
+void drawBatteryLevel(int x0, int y_bot) {
+    int level = battery_level();
+    if (level < 0) return;
+
+    constexpr int W  = 20;
+    constexpr int H  = 13;
+    constexpr int NW = 4;
+    constexpr int NH = 7;
+
+    bool charging  = battery_charging();
+    int  fill_color = charging ? BLACK : (level > 50) ? GREEN : (level > 20) ? YELLOW : RED;
+
+    // Body outline and nub
+    canvas.drawRect(x0, y_bot - H, W, H, WHITE);
+    canvas.fillRect(x0 + W, y_bot - (H + NH) / 2, NW, NH, WHITE);
+
+    // Level fill
+    int fill_w = (level * (W - 2)) / 100;
+    if (fill_w > 0) {
+        canvas.fillRect(x0 + 1, y_bot - H + 1, fill_w, H - 2, fill_color);
+    }
+
+    // Lightning bolt overlay when charging
+    if (charging) {
+        int bx = x0 + W / 2;
+        int by = y_bot - (H + 1) / 2;  // vertical center
+        canvas.fillTriangle(bx + 3, by - 4, bx - 1, by, bx + 3, by, GREEN);
+        canvas.fillTriangle(bx - 3, by, bx + 1, by, bx - 3, by + 4, GREEN);
+    }
+}
+#endif
+
+#if defined(USE_M5) || defined(USE_LOVYANGFX)
+static void drawBatteryLevelOverlay() {
+    if (round_display) return;   // M5 Dial: battery indicator only shown in menu scene
+    int level = battery_level();
+    if (level < 0) return;
+    drawBatteryLevel(display_short_side() - 29, 20);
+}
+#endif
+
+#ifdef USE_WIFI
 static void drawWiFiSignalOverlay() {
     if (round_display) return;   // M5 Dial: WiFi indicator only shown in menu scene
     drawWiFiSignalBars(5, 20);
@@ -379,6 +423,9 @@ void drawESPNowIndicator(int x0, int y_bot) {
 void refreshDisplay() {
 #ifdef USE_WIFI
     drawWiFiSignalOverlay();
+#endif
+#if defined(USE_M5) || defined(USE_LOVYANGFX)
+    drawBatteryLevelOverlay();
 #endif
     display.startWrite();
     canvas.pushSprite(sprite_offset.x, sprite_offset.y);
