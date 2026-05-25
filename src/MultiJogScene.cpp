@@ -42,9 +42,12 @@ private:
     uint32_t _last_mpg_ms = 0;
 #ifdef USE_ESPNOW
     // A dial click (and a button-held jog) sends one $J= command then goes quiet.
-    // FluidNC's ESP-NOW jog watchdog cancels the jog if the pendant goes silent,
-    // so we send a lightweight '?' keepalive for the whole duration of any jog.
-    static const uint32_t JOG_KEEPALIVE_MS = 250;
+    // FluidNC's ESP-NOW jog watchdog (kJogWatchdogMs = 500 ms) cancels the jog if
+    // the pendant goes silent, so we send a lightweight '?' keepalive for the
+    // whole duration of any jog. 125 ms (4x margin to the 500 ms watchdog) keeps
+    // a long multi-jog fed even when the main loop jitters under heavy DRO
+    // re-rendering, so a 300 mm move isn't cut short mid-sequence.
+    static const uint32_t JOG_KEEPALIVE_MS = 125;
     uint32_t _last_jog_keepalive_ms = 0;
 #endif
 
