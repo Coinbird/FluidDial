@@ -364,11 +364,17 @@ extern "C" void show_gcode_modes(struct gcode_modes* modes) {
 int disconnect_ms = 0;
 int next_ping_ms  = 0;
 
-// Send a status report request if we haven't heard from FluidNC recently.
-// The interval also serves as a keepalive: FluidNC's ESP-NOW server uses
-// inbound pings to detect a dead pendant (kIdleTimeoutMs = 4000 ms), so the
-// ping interval must stay well below that to avoid false-positive timeouts.
-const int ping_interval_ms = 1500;
+// Send a status report request ('?') when we haven't heard from FluidNC for
+// this long. It only fires while RX is quiet (each received byte pushes the
+// timer out), so it has two jobs:
+//   - keepalive: FluidNC's ESP-NOW server uses inbound traffic to detect a dead
+//     pendant (kIdleTimeoutMs = 4000 ms), so this must stay well below that.
+//   - liveness probe: in ESP-NOW mode each quiet-period '?' is a unicast send
+//     whose ACK feeds espnow_link_dead(). 500 ms lets a real disconnect be
+//     confirmed in ~2 s (kLinkDeadFails consecutive un-ACK'd sends) while a
+//     feed-hold pause (controller alive, just quiet) keeps ACKing and is NOT
+//     treated as a disconnect.
+const int ping_interval_ms = 500;
 
 // If we haven't heard from FluidNC in 3 seconds for any reason, declare
 // FluidNC unresponsive. Kept above the worst-case transient reporting gap
@@ -502,26 +508,40 @@ bool fnc_is_connected() {
         return false;             // Do we need a value for "unknown"?
     }
     if ((now - disconnect_ms) >= 0) {
+#ifdef USE_ESPNOW
+        if (!espnow_use_uart_mode()) {
+            // ESP-NOW: status-report silence is NOT a disconnect. FluidNC pauses
+            // status output during a feed-hold / when idle while the link is
+            // perfectly alive. The real liveness signal is unicast ACK success,
+            // not RX cadence — so only declare N/C when our sends are failing.
+            if (!espnow_link_dead()) {
+                // Controller still ACKing our sends → alive, just quiet. Poke it
+                // for a fresh report and keep the connection; don't drop the UI.
+                FD_DEBUG("[conn] RX quiet but link alive (q=%d) — poke, stay connected\r\n",
+                         espnow_link_quality());
+                request_status_report();  // '?' to elicit a report (sets next_ping_ms)
+                disconnect_ms = now + disconnect_interval_ms;
+                return true;
+            }
+            // Sends are failing → controller really gone / out of range.
+            s_consecutive_timeouts++;
+            bootlog_printf("disconnected: link dead #%d", s_consecutive_timeouts);
+            FD_DEBUG("[conn] link dead (q=%d) -> N/C #%d; id=%d\r\n", espnow_link_quality(),
+                     s_consecutive_timeouts, espnow_pendant_id());
+            espnow_request_connect();  // re-acquire (handles controller reboot/channel change)
+            next_ping_ms  = now + ping_interval_ms;
+            disconnect_ms = now + disconnect_interval_ms;
+            return false;
+        }
+#endif
+        // UART / WiFi: RX-silence timeout with the escalating recovery ladder.
         s_consecutive_timeouts++;
         bootlog_printf("disconnected: timeout #%d", s_consecutive_timeouts);
-#ifdef USE_ESPNOW
-        FD_DEBUG("[conn] RX timeout #%d (no RX for %d ms); espnow id=%d uart=%d\r\n",
-                 s_consecutive_timeouts, disconnect_interval_ms, espnow_pendant_id(),
-                 (int)espnow_use_uart_mode());
-#else
         FD_DEBUG("[conn] RX timeout #%d (no RX for %d ms)\r\n", s_consecutive_timeouts,
                  disconnect_interval_ms);
-#endif
         recover_link(s_consecutive_timeouts);
         next_ping_ms  = now + ping_interval_ms;
         disconnect_ms = now + disconnect_interval_ms;
-#ifdef USE_ESPNOW
-        if (!espnow_use_uart_mode()) {
-            espnow_request_connect();  // re-trigger handshake after FluidNC reboot
-            FD_DEBUG("[conn] espnow_request_connect -> id=%d quality=%d\r\n",
-                     espnow_pendant_id(), espnow_link_quality());
-        }
-#endif
         return false;
     }
 

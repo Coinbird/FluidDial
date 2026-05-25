@@ -32,17 +32,18 @@ private:
     bool         _continuous    = false;
     // MPG jog rate-limiting: accumulate encoder ticks and send at most one
     // jog command per MPG_INTERVAL_MS to avoid flooding FluidNC's planner queue.
+    // FluidDial uses a FIXED-DISTANCE dial model: one click jogs the full digit
+    // distance (e.g. 100 mm) to completion. We deliberately do NOT use upstream's
+    // "cancel the jog once the dial stops turning" (live-jog) behavior, which
+    // would cut a single-click move short — especially over ESP-NOW, where the
+    // state→Jog status arrives later than the cancel window.
     static const uint32_t MPG_INTERVAL_MS = 30;
-    static const uint32_t MPG_STOP_MS     = 280;
-    int      _mpg_accum      = 0;
-    uint32_t _last_mpg_ms    = 0;
-    uint32_t _last_mpg_tick_ms = 0;
+    int      _mpg_accum   = 0;
+    uint32_t _last_mpg_ms = 0;
 #ifdef USE_ESPNOW
-    // Button-held continuous jog sends one long $J= command then goes quiet.
+    // A dial click (and a button-held jog) sends one $J= command then goes quiet.
     // FluidNC's ESP-NOW jog watchdog cancels the jog if the pendant goes silent,
-    // so we send a lightweight '?' keepalive while the button is held. The MPG
-    // case feeds the link naturally while the dial turns (and cancels promptly
-    // when it stops), so it needs no keepalive.
+    // so we send a lightweight '?' keepalive for the whole duration of any jog.
     static const uint32_t JOG_KEEPALIVE_MS = 250;
     uint32_t _last_jog_keepalive_ms = 0;
 #endif
@@ -248,7 +249,6 @@ public:
         }
         _mpg_accum = 0;
         _last_mpg_ms = 0;
-        _last_mpg_tick_ms = 0;
     }
     void next_axis() {
         int the_axis = the_selected_axis();
@@ -451,28 +451,17 @@ public:
 
     void onEncoder(int delta) {
         _mpg_accum += delta;
-        _last_mpg_tick_ms = millis();
         flush_mpg();
     }
 
     void onPoll() override {
         flush_mpg();
-        // MPG/dial jog: once the dial stops turning for MPG_STOP_MS, flush any
-        // remaining ticks and cancel so the handwheel stops promptly.
-        if (state == Jog && !_continuous && _last_mpg_tick_ms != 0) {
-            uint32_t now = millis();
-            if ((now - _last_mpg_tick_ms) >= MPG_STOP_MS) {
-                flush_mpg(true);
-                if (_mpg_accum == 0) {
-                    cancel_jog();
-                    _last_mpg_tick_ms = 0;
-                }
-            }
-        }
 #ifdef USE_ESPNOW
-        // Button-held continuous jog goes silent after its single $J=, so feed
-        // the FluidNC ESP-NOW jog watchdog with a '?' keepalive while held.
-        if (_continuous && state == Jog) {
+        // Keepalive for the whole duration of ANY jog (dial click or button-held).
+        // Both send a single $J= then go silent, so without this FluidNC's jog
+        // watchdog (500 ms) would cancel a long move (e.g. a 100 mm click) before
+        // it finishes. Gated on Jog state so an idle pendant stays quiet.
+        if (state == Jog) {
             uint32_t now = millis();
             if ((now - _last_jog_keepalive_ms) >= JOG_KEEPALIVE_MS) {
                 _last_jog_keepalive_ms = now;

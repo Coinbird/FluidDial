@@ -38,18 +38,32 @@ static constexpr int kMaxInflight = 4;  // ESP-NOW internal queue is ~7
 // main task (espnow_link_quality). Starts optimistic so a fresh link shows full.
 static std::atomic<int> _link_quality { 1000 };
 
+// Consecutive un-ACK'd unicast sends. Drives espnow_link_dead() — the liveness
+// signal used for disconnect detection. Reset to 0 on any successful ACK and on
+// (re)connect. Written in the WiFi task (on_send), read in the main task.
+static std::atomic<int>  _consecutive_tx_fail { 0 };
+static constexpr int     kLinkDeadFails = 4;  // declare dead after this many
+
 static void on_send(const uint8_t* mac, esp_now_send_status_t status) {
     _tx_inflight.fetch_sub(1, std::memory_order_relaxed);
     // Only unicast frames are ACK'd by the 802.11 layer. Broadcast always
-    // reports SUCCESS on transmit (no ACK expected) and would skew the
-    // estimate, so exclude it.
+    // reports SUCCESS on transmit (no ACK expected) and would skew both the
+    // quality estimate and the failure counter, so exclude it.
     if (memcmp(mac, kBroadcast, 6) == 0) {
         return;
     }
-    int sample = (status == ESP_NOW_SEND_SUCCESS) ? 1000 : 0;
+    bool ok = (status == ESP_NOW_SEND_SUCCESS);
+
+    int sample = ok ? 1000 : 0;
     int q      = _link_quality.load(std::memory_order_relaxed);
     q += (sample - q) >> 3;  // exponential moving average, alpha = 1/8
     _link_quality.store(q, std::memory_order_relaxed);
+
+    if (ok) {
+        _consecutive_tx_fail.store(0, std::memory_order_relaxed);
+    } else {
+        _consecutive_tx_fail.fetch_add(1, std::memory_order_relaxed);
+    }
 }
 
 static void flush_tx() {
@@ -161,9 +175,10 @@ static void on_recv(const uint8_t* mac, const uint8_t* data, int len) {
             const char* id_str = strstr(reinterpret_cast<const char*>(data + kPrefixLen), "id=");
             _pendant_id        = id_str ? atoi(id_str + 3) : 0;
             _connected         = true;
-            // Fresh link — reset the quality EMA to optimistic so a reconnect
-            // doesn't linger at the low value it decayed to while down.
+            // Fresh link — reset the quality EMA to optimistic and clear the
+            // failure counter so a reconnect doesn't linger at stale values.
             _link_quality.store(1000, std::memory_order_relaxed);
+            _consecutive_tx_fail.store(0, std::memory_order_relaxed);
         }
         // All other [FluidNC: ...] frames (Busy, broadcast status, etc.) are
         // silently ignored on the controller side.
@@ -321,6 +336,18 @@ int espnow_link_quality() {
     if (q >= 400) return 2;
     if (q >= 150) return 1;
     return 0;
+}
+
+// True when the unicast link appears dead — kLinkDeadFails consecutive sends
+// went un-ACK'd (controller powered off / out of range). This is the disconnect
+// signal for ESP-NOW, used INSTEAD of status-report silence: FluidNC stops
+// emitting status during a feed-hold / when idle, but the link is still alive
+// and ACKing, so silence alone must not be treated as a disconnect.
+bool espnow_link_dead() {
+    if (_uart_mode) {
+        return false;  // wired — liveness is handled by UART RX, not ACKs
+    }
+    return _consecutive_tx_fail.load(std::memory_order_relaxed) >= kLinkDeadFails;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

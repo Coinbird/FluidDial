@@ -33,4 +33,9 @@ int espnow_pendant_id();
 // core does not expose raw RSSI). 0 in wired UART mode.
 int espnow_link_quality();
 
+// True when the unicast link looks dead (several consecutive un-ACK'd sends).
+// Use this — not status-report silence — to detect a real disconnect, since
+// FluidNC legitimately pauses status output during feed-hold / idle.
+bool espnow_link_dead();
+
 #endif  // USE_ESPNOW
