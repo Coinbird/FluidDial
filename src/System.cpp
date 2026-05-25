@@ -21,6 +21,15 @@ void dbg_printf(const char* format, ...) {
     va_end(args);
 }
 
+void dbg_logf(const char* format, ...) {
+    char    buf[160];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buf, sizeof(buf), format, args);
+    va_end(args);
+    dbg_print(buf);  // routes to debugPort; per-platform gated by DEBUG_TO_USB
+}
+
 void dbg_print(const std::string& s) {
     dbg_print(s.c_str());
 }

@@ -26,6 +26,8 @@ int touchDeltaY;
 std::vector<Scene*> scene_stack;
 
 void activate_scene(Scene* scene, void* arg) {
+    FD_DEBUG("[scene] activate %s (from %s)\r\n", scene ? scene->name() : "?",
+             current_scene ? current_scene->name() : "none");
     bool prev_show = !current_scene || current_scene->showButtons();
     if (current_scene) {
         current_scene->onExit();
@@ -38,14 +40,21 @@ void activate_scene(Scene* scene, void* arg) {
     }
 }
 void push_scene(Scene* scene, void* arg) {
+    FD_DEBUG("[scene] push %s (depth %d->%d)\r\n", scene ? scene->name() : "?",
+             (int)scene_stack.size(), (int)scene_stack.size() + 1);
     scene_stack.push_back(current_scene);
     activate_scene(scene, arg);
 }
 void pop_scene(void* arg) {
     if (scene_stack.size()) {
         Scene* last_scene = scene_stack.back();
+        FD_DEBUG("[scene] pop -> %s (depth %d->%d)\r\n", last_scene ? last_scene->name() : "?",
+                 (int)scene_stack.size(), (int)scene_stack.size() - 1);
         scene_stack.pop_back();
         activate_scene(last_scene, arg);
+    } else {
+        FD_DEBUG("[scene] pop ignored (stack empty), current=%s\r\n",
+                 current_scene ? current_scene->name() : "none");
     }
 }
 void activate_at_top_level(Scene* scene, void* arg) {
@@ -213,6 +222,8 @@ void dispatch_events() {
 
     if (!fnc_is_connected()) {
         if (state != Disconnected) {
+            FD_DEBUG("[conn] not connected -> dropping to menu from %s (state was %s)\r\n",
+                     current_scene ? current_scene->name() : "none", state_name(state));
             set_disconnected_state();
 #ifdef USE_WIFI
             wifi_force_ws_reconnect();
@@ -288,5 +299,8 @@ void Scene::background() {
 }
 
 void act_on_state_change() {
+    FD_DEBUG("[scene] %s onStateChange(prev=%s cur=%s)\r\n",
+             current_scene ? current_scene->name() : "none",
+             state_name(previous_state), state_name(state));
     current_scene->onStateChange(previous_state);
 }

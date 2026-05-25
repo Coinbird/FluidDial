@@ -67,6 +67,20 @@ void dbg_print(const std::string& s);
 void dbg_println(const std::string& s);
 void dbg_printf(const char* format, ...);
 
+// Formatted verbose logger that routes to debugPort (USB-C on the M5Dial),
+// gated by DEBUG_TO_USB. Use the FD_DEBUG macro below rather than calling this
+// directly so the logs vanish entirely in non-debug builds.
+void dbg_logf(const char* format, ...);
+
+// FD_DEBUG(...) — verbose diagnostic logging (scene nav, state/connection
+// changes). Enabled by the FD_DEBUG_LOG build flag (set in the *_debug envs);
+// compiles to nothing otherwise, so normal builds pay zero cost.
+#ifdef FD_DEBUG_LOG
+#    define FD_DEBUG(...) dbg_logf(__VA_ARGS__)
+#else
+#    define FD_DEBUG(...) ((void)0)
+#endif
+
 void update_events();
 void delay_ms(uint32_t ms);
 

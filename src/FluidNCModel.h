@@ -27,6 +27,9 @@ extern state_t     state;
 extern state_t     previous_state;
 extern const char* my_state_string;
 
+// Human-readable name for a state_t (for debug logging).
+const char* state_name(state_t s);
+
 extern int                n_axes;
 extern pos_t              myAxes[6];
 extern bool               myLimitSwitches[6];

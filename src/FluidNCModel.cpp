@@ -83,8 +83,30 @@ bool decode_state_string(const char* state_string, state_t& state) {
 }
 
 void set_disconnected_state() {
+    if (state != Disconnected) {
+        FD_DEBUG("[conn] -> N/C (was %s)\r\n", state_name(state));
+    }
     state           = Disconnected;
     my_state_string = "N/C";
+}
+
+const char* state_name(state_t s) {
+    switch (s) {
+        case Idle:         return "Idle";
+        case Alarm:        return "Alarm";
+        case CheckMode:    return "Check";
+        case Homing:       return "Homing";
+        case Cycle:        return "Cycle";
+        case Hold:         return "Hold";
+        case Jog:          return "Jog";
+        case DoorOpen:     return "DoorOpen";
+        case DoorClosed:   return "DoorClosed";
+        case GrblSleep:    return "Sleep";
+        case ConfigAlarm:  return "ConfigAlarm";
+        case Critical:     return "Critical";
+        case Disconnected: return "Disconnected";
+    }
+    return "?";
 }
 
 // clang-format off
@@ -233,6 +255,7 @@ extern "C" void show_state(const char* state_string) {
     previous_state = state;
     state_t new_state;
     if (decode_state_string(state_string, new_state) && state != new_state) {
+        FD_DEBUG("[state] %s -> %s\r\n", state_name(state), state_name(new_state));
         if (state == Disconnected) {
             schedule_action(connect_init);
         }
@@ -347,9 +370,11 @@ int next_ping_ms  = 0;
 // ping interval must stay well below that to avoid false-positive timeouts.
 const int ping_interval_ms = 1500;
 
-// If we haven't heard from FluidNC in 2 seconds for any reason, declare
-// FluidNC unresponsive.
-const int disconnect_interval_ms = 2000;
+// If we haven't heard from FluidNC in 3 seconds for any reason, declare
+// FluidNC unresponsive. Kept above the worst-case transient reporting gap
+// (e.g. FluidNC pausing status output during a feed-hold deceleration) so a
+// brief stall doesn't trip a false N/C and bounce the UI to the menu.
+const int disconnect_interval_ms = 3000;
 
 bool starting = true;
 
@@ -479,12 +504,22 @@ bool fnc_is_connected() {
     if ((now - disconnect_ms) >= 0) {
         s_consecutive_timeouts++;
         bootlog_printf("disconnected: timeout #%d", s_consecutive_timeouts);
+#ifdef USE_ESPNOW
+        FD_DEBUG("[conn] RX timeout #%d (no RX for %d ms); espnow id=%d uart=%d\r\n",
+                 s_consecutive_timeouts, disconnect_interval_ms, espnow_pendant_id(),
+                 (int)espnow_use_uart_mode());
+#else
+        FD_DEBUG("[conn] RX timeout #%d (no RX for %d ms)\r\n", s_consecutive_timeouts,
+                 disconnect_interval_ms);
+#endif
         recover_link(s_consecutive_timeouts);
         next_ping_ms  = now + ping_interval_ms;
         disconnect_ms = now + disconnect_interval_ms;
 #ifdef USE_ESPNOW
         if (!espnow_use_uart_mode()) {
             espnow_request_connect();  // re-trigger handshake after FluidNC reboot
+            FD_DEBUG("[conn] espnow_request_connect -> id=%d quality=%d\r\n",
+                     espnow_pendant_id(), espnow_link_quality());
         }
 #endif
         return false;
