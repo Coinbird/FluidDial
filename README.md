@@ -1,5 +1,7 @@
 # FluidDial: A CNC Pendant for FluidNC Firmware.
 
+## UPDATE - This fork is NO LONGER UNDER DEVELOPMENT. It functions but I recommend you move forward with the official ESP-NOW support branch: https://github.com/figamore/FluidDial/blob/main/docs%2FESP-NOW.md
+
 ### This fork adds <img src="data/espnow.png" width="70"> (https://www.espressif.com/en/solutions/low-power-solutions/esp-now) protocol support for direct connection to the FluidNC board, wirelessly, without relying on a WiFi connection.
 ### See FluidDial/README-ESP-NOW.md for details
 
